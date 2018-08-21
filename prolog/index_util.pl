@@ -3,6 +3,8 @@
 :- module(index_util,[
 		      materialize_index/1,
 		      materialize_index/2,
+                      materialize_index_to_path/2,
+                      materialize_indexes_to_path/2,
                       materialize_index_to_file/2,
                       materialize_index_to_file/3,
 		      materialize_indexes_to_file/2,
@@ -21,6 +23,7 @@
 :- module_transparent materialize_index_to_path/2.
 :- module_transparent materialize_indexes_to_path/2.
 :- module_transparent materialize_index_to_stream/2.
+:- module_transparent load_factfile/1.
 
 :- dynamic is_indexed/2.
 
@@ -45,13 +48,26 @@ materialize_index(M, Term) :-
 materialize_index(M, Term) :-
 	debug(index, 'indexing ~w:~w', [M, Term]),
         !,
+	Term =.. [Pred | Args],
+	length(Args, Arity),
+	functor(Goal, Pred, Arity),
+	debug(index, 'rewriting ~w', [Goal]),
+	setof(Goal, M:Goal, Facts),
+        M:abolish(Pred/Arity),
+        M:maplist(assert,Facts),
+	M:compile_predicates([Pred/Arity]),
+        assert(index_util:is_indexed(M,Term)),
+	debug(index, 'done indexing ~w:~w', [M, Term]).
+old__materialize_index(M, Term) :-
+	debug(index, 'indexing ~w:~w', [M, Term]),
+        !,
 	Term=..[CalledPred, _|IxArgsRest],
 	IxArgs=[1|IxArgsRest],  % always index the first argument - this is the default index
 	length(IxArgs, Arity),
 	predicate_ixname(CalledPred, StoredPred, 1),
 	functor(CalledGoal, CalledPred, Arity),
 	CalledGoal=..[CalledPred|Args],
-	StoredGoal=..[StoredPred|Args],
+        StoredGoal=..[StoredPred|Args],
 	debug(index, 'rewriting ~w', [CalledGoal]),
 	rewrite_goal_with_index_list(M, CalledGoal, 1, IxArgs),
 	DefaultGoal = ( CalledGoal :- StoredGoal ),
@@ -64,6 +80,20 @@ materialize_index(M, Term) :-
 materialize_indexes_to_path(Terms,Dir) :-
 	forall(member(Term,Terms),
 	       materialize_index_to_path(Term,Dir)).
+
+materialize_index_to_stream(M:Term,IO) :-
+        !,
+	materialize_index(M:Term),
+	functor(Term,Pred,Arity),
+	functor(Goal,Pred,Arity),
+	forall(M:Goal,
+	       format(IO,'~q.~n',[M:Goal])).
+materialize_index_to_stream(Term,IO) :-
+	materialize_index(Term),
+	functor(Term,Pred,Arity),
+	functor(Goal,Pred,Arity),
+	forall(Goal,
+	       format(IO,'~q.~n',[Goal])).
 
 %! materialize_index_to_path(+Term,+Dir)
 %
@@ -82,6 +112,7 @@ materialize_index_to_file(Term,File) :-
 
 materialize_index_to_file(Term,File,Opts) :-
         materialize_indexes_to_file([Term],File,Opts).
+
 
 
 
@@ -115,7 +146,8 @@ materialize_indexes_to_file(Terms,File,_Opts) :-
 	       (   functor(Term,Pred,Arity),
 		   abolish(Pred/Arity))),
 	% load cached version:
-	load_files([File],[qcompile(auto)]),
+        load_factfile(File),
+	%load_files([File],[qcompile(auto)]),
         debug(index, 'loaded: ~w', [File]),
 	forall(member(Term,Terms),
 	       materialize_index(Term)).
@@ -124,22 +156,27 @@ materialize_indexes_to_file(Terms,File,_Opts) :-
 	open(File,write,IO),
 	forall(member(Term,Terms),
 	       materialize_index_to_stream(Term,IO)),
-	close(IO).
+	close(IO),
+        debug(index,'Compiling: ~w',[File]),
+        qcompile(File).
 
-materialize_index_to_stream(M:Term,IO) :-
-        !,
-	materialize_index(M:Term),
-	functor(Term,Pred,Arity),
-	functor(Goal,Pred,Arity),
-	forall(M:Goal,
-	       format(IO,'~q.~n',[M:Goal])).
-materialize_index_to_stream(Term,IO) :-
-	materialize_index(Term),
-	functor(Term,Pred,Arity),
-	functor(Goal,Pred,Arity),
-	forall(Goal,
-	       format(IO,'~q.~n',[Goal])).
 
+load_factfile(PlFile) :-
+	file_name_extension(Base, _Ext, PlFile),
+	file_name_extension(Base, qlf, QlfFile),
+        debug(index,'checking for: ~w',[QlfFile]),
+	(   exists_file(QlfFile),
+	    time_file(QlfFile, QlfTime),
+	    time_file(PlFile, PlTime),
+	    QlfTime >= PlTime
+	->  load_files([QlfFile]),
+            debug(index, 'Loaded from ~w',[QlfFile])
+	;   access_file(QlfFile, write)
+	->  qcompile(PlFile)
+        ;   debug(index,'  cannot write to qlf, loading from: ~w',[PlFile]),
+            load_files(PlFile)
+	).
+        
 
 
 
@@ -152,17 +189,19 @@ rewrite_goal_with_index_list(M, CalledGoal, Ix, [A|Args]) :-
 	rewrite_goal_with_index_list(M, CalledGoal, Ix2, Args).
 
 %! rewrite_goal_with_index_list(+Mod, +CalledGoal, +ArgNum:int, +IndexMe:int) is det
+rewrite_goal_with_index(M, CalledGoal, Ix, (+) ) :-
+        rewrite_goal_with_index(M, CalledGoal, Ix, 1).
 rewrite_goal_with_index(M, CalledGoal, Ix, 1) :-
 	debug(index, '  index ~w', [Ix]),
         !,
 	CalledGoal=..[CalledPred|Args],
 	length(Args,Arity),
 	predicate_storedname(CalledPred, StoredPred, Ix),
-	debug(index, '  using ~w in ~w', [StoredPred/Arity,M]),
 	reorder_args(Ix, IxVar, Args, ReorderedArgs),
 	StoredGoal=..[StoredPred|Args],
 	predicate_ixname(CalledPred, IxPred, Ix),
 	IxGoal=..[IxPred|ReorderedArgs],
+	debug(index, '  using ~w in ~w // ~w', [StoredPred/Arity,M,IxGoal]),
         M:dynamic(IxPred/Arity),
 	setof(IxGoal,M:StoredGoal,IxFacts),
         M:maplist(assert,IxFacts),

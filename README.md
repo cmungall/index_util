@@ -58,7 +58,7 @@ my_fact(A,B,C) :-
     !,
     my_fact__ix_3(C,A,B).
 my_fact(A,B,C) :-
-    my_fact__ix_1(A,N,C).
+    my_fact__ix_1(A,B,C).
 ```
 
 here `my_fact__ix_1` and `my_fact__ix_3` contain the same data as the original `my_fact/3` clause. In the second case, the arguments have been reordered
