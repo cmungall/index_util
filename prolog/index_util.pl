@@ -26,6 +26,7 @@
 :- module_transparent load_factfile/1.
 
 :- dynamic is_indexed/2.
+:- dynamic temp_fact/1.
 
 %! materialize_index(+Term) is det
 % materialize and index a set of facts, using first-argument indexing.
@@ -51,10 +52,14 @@ materialize_index(M, Term) :-
 	Term =.. [Pred | Args],
 	length(Args, Arity),
 	functor(Goal, Pred, Arity),
-	debug(index, 'rewriting ~w', [Goal]),
-	setof(Goal, M:Goal, Facts),
+        retractall(temp_fact(_)),
+	debug(index, 'rewriting ~w:~w', [M,Goal]),
+        forall(M:Goal,
+               assert(temp_fact(Goal))),
         M:abolish(Pred/Arity),
-        M:maplist(assert,Facts),
+        M:forall(temp_fact(Goal),
+               assert(Goal)),
+        retractall(temp_fact(_)),
 	M:compile_predicates([Pred/Arity]),
         assert(index_util:is_indexed(M,Term)),
 	debug(index, 'done indexing ~w:~w', [M, Term]).
