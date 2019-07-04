@@ -28,6 +28,8 @@
 :- dynamic is_indexed/2.
 :- dynamic temp_fact/1.
 
+:- multifile fast_index/1.
+
 %! materialize_index(+Term) is det
 % materialize and index a set of facts, using first-argument indexing.
 % Term follows the same structure as in index/1. E.g.
@@ -47,10 +49,11 @@ materialize_index(M, Term) :-
 	debug(index, '  already indexed ~w:~w', [M, Term]),
         !.
 materialize_index(M, Term) :-
-	debug(index, 'indexing ~w:~w', [M, Term]),
-        !,
 	Term =.. [Pred | Args],
 	length(Args, Arity),
+        index_util:fast_index(Pred/Arity),
+	debug(index, 'fast indexing ~w:~w', [M, Term]),
+        !,
 	functor(Goal, Pred, Arity),
         retractall(temp_fact(_)),
 	debug(index, 'rewriting ~w:~w', [M,Goal]),
@@ -63,6 +66,21 @@ materialize_index(M, Term) :-
 	M:compile_predicates([Pred/Arity]),
         assert(index_util:is_indexed(M,Term)),
 	debug(index, 'done indexing ~w:~w', [M, Term]).
+materialize_index(M, Term) :-
+	debug(index, 'indexing (unique strategy) ~w:~w', [M, Term]),
+        !,
+	Term =.. [Pred | Args],
+	length(Args, Arity),
+	functor(Goal, Pred, Arity),
+	debug(index, 'rewriting ~w', [Goal]),
+	setof(Goal, M:Goal, Facts),
+        M:abolish(Pred/Arity),
+        M:maplist(assert,Facts),
+	M:compile_predicates([Pred/Arity]),
+        assert(index_util:is_indexed(M,Term)),
+	debug(index, 'done indexing ~w:~w', [M, Term]).
+
+
 old__materialize_index(M, Term) :-
 	debug(index, 'indexing ~w:~w', [M, Term]),
         !,
