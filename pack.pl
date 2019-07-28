@@ -1,6 +1,6 @@
 name(index_util).
 title('Prolog index utils').
-version('0.0.3').
+version('0.0.4').
 author('Chris Mungall','cmungall@gmail.com').
 packager('Chris Mungall','cmungall@gmail.com').
 home('https://github.com/cmungall/index_util').
